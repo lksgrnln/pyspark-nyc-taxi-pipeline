@@ -1,6 +1,5 @@
 import os
 import requests
-from functools import reduce
 import pyspark.sql.functions as F
 from pyspark.sql import SparkSession
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -10,17 +9,25 @@ class NYCTaxiPipeline:
                  base_uri: str = 'https://d37ci6vzurychx.cloudfront.net/trip-data/' ,
                  master_mode: str = 'local[*]',
                  partitions: int = 20,
+                 ram: str = "3g",
                  years = None,
                  months = None,
-                 aggregation_level: str = 'day',
+                 aggregation_mode: str = 'all',
                  keep_all_columns: bool = False):
         """Initializes the Pipeline Class Parameters.
         Args:
             base_uri (str): The base URI where the NYC Taxi Parquet data resides.
             master_mode (str): The Spark deployment master string (e.g., 'local[*]' for local execution).
             partitions (int): Total shuffle partitions to use during wide transformations (e.g., joins, aggregations).
+            ram (str): Set allocated RAM size for pyspark driver and executor.
             years (list): List of integer or string years to process (e.g., [2022, 2023]).
             months (list): List of integer or string months to process (e.g., [1, 2] or ['01', '02']).
+            aggregation_mode (str): Mode to control which aggregations are computed in the pipeline.
+                Default prints all metrics from assignment.
+                Possible values: "all", "avg_per_year", "avg_per_month", "avg_per_day", "global",
+                "avg_per_hour"
+            keep_all_columns (bool): Switch to keep all information
+                or to drop columns with no information for this assignment.
         """
         if years is None:
             years = [2021, 2022, 2023, 2024, 2025]
@@ -29,9 +36,10 @@ class NYCTaxiPipeline:
         self.base_uri = base_uri
         self.master_mode = master_mode
         self.partitions = partitions
+        self.ram = ram
         self.years = years
         self.months = months
-        self.aggregation_level = aggregation_level
+        self.aggregation_mode = aggregation_mode
         self.keep_all_columns = keep_all_columns
         self.spark_session = None
 
@@ -51,10 +59,10 @@ class NYCTaxiPipeline:
         print(f"[INFO] Initializing Spark Session via master: '{self.master_mode}'...")
 
         self.spark_session = SparkSession.builder \
-            .appName(f"NYC-Taxi-Pipeline-{self.aggregation_level}") \
+            .appName(f"NYC-Taxi-Pipeline") \
             .master(self.master_mode) \
-            .config("spark.driver.memory", "3g") \
-            .config("spark.executor.memory", "3g") \
+            .config("spark.driver.memory", str(self.ram)) \
+            .config("spark.executor.memory", str(self.ram)) \
             .config("spark.sql.shuffle.partitions", str(self.partitions)) \
             .config("spark.sql.ansi.enabled", "true") \
             .config("spark.sql.parquet.enableVectorizedReader", "true") \
@@ -105,7 +113,7 @@ class NYCTaxiPipeline:
             for future in as_completed(futures):
                 path_result = future.result()
                 if path_result:
-                    local_paths.append(path_result)  # <--- Populating the list
+                    local_paths.append(path_result)
 
         if not local_paths:
             raise RuntimeError("[CRITICAL] No valid data files found or downloaded.")
@@ -199,34 +207,40 @@ class NYCTaxiPipeline:
         analyzed_df.cache()
 
         # --- CORE METRICS ---
-        print("\n--- [CORE METRIC] Average Trip Duration per Year ---")
-        avg_year_df = analyzed_df.groupBy("year") \
-            .agg(F.round(F.avg("trip_duration_min"), 2).alias("avg_duration_min")) \
-            .sort("year")
-        avg_year_df.show(truncate=False)
+        if self.aggregation_mode == 'all' or self.aggregation_mode == "avg_per_year":
+            print("\n--- [CORE METRIC] Average Trip Duration per Year ---")
+            avg_year_df = analyzed_df.groupBy("year") \
+                .agg(F.round(F.avg("trip_duration_min"), 2).alias("avg_duration_min")) \
+                .sort("year")
+            avg_year_df.show(truncate=False)
 
-        print("\n--- [CORE METRIC] Average Trip Duration per Month ---")
-        avg_month_df = analyzed_df.groupBy("year", "month") \
-            .agg(F.round(F.avg("trip_duration_min"), 2).alias("avg_duration_min")) \
-            .sort("year", "month")
-        avg_month_df.show(len(self.years) * 12, truncate=False)
+        if self.aggregation_mode == 'all' or self.aggregation_mode == "avg_per_month":
+            print("\n--- [CORE METRIC] Average Trip Duration per Month ---")
+            avg_month_df = analyzed_df.groupBy("year", "month") \
+                .agg(F.round(F.avg("trip_duration_min"), 2).alias("avg_duration_min")) \
+                .sort("year", "month")
+            avg_month_df.show(len(self.years) * 12, truncate=False)
 
-        print("\n--- [CORE METRIC] Global Overall Average Trip Duration ---")
-        overall_avg = analyzed_df.select(F.round(F.avg("trip_duration_min"), 2).alias("global_avg_duration_min"))
-        overall_avg.show(truncate=False)
+        if self.aggregation_mode == 'all' or self.aggregation_mode == "global":
+            print("\n--- [CORE METRIC] Global Overall Average Trip Duration ---")
+            overall_avg = analyzed_df.select(F.round(F.avg("trip_duration_min"),
+                                                     2).alias("global_avg_duration_min"))
+            overall_avg.show(truncate=False)
 
         # --- EXTENDED ANALYSIS ---
-        print("\n--- [EXTENDED METRIC] Average Trip Duration per Hour of Day (Rush Hours) ---")
-        avg_hour_df = analyzed_df.groupBy("hour") \
-            .agg(F.round(F.avg("trip_duration_min"), 2).alias("avg_duration_min")) \
-            .sort("hour")
-        avg_hour_df.show(24, truncate=False)
+        if self.aggregation_mode == 'all' or self.aggregation_mode == "avg_per_hour":
+            print("\n--- [EXTENDED METRIC] Average Trip Duration per Hour of Day (Rush Hours) ---")
+            avg_hour_df = analyzed_df.groupBy("hour") \
+                .agg(F.round(F.avg("trip_duration_min"), 2).alias("avg_duration_min")) \
+                .sort("hour")
+            avg_hour_df.show(24, truncate=False)
 
-        print("\n--- [EXTENDED METRIC] Average Trip Duration per Day of Week (1=Sun, 7=Sat) ---")
-        avg_dow_df = analyzed_df.groupBy("day_of_week") \
-            .agg(F.round(F.avg("trip_duration_min"), 2).alias("avg_duration_min")) \
-            .sort("day_of_week")
-        avg_dow_df.show(truncate=False)
+        if self.aggregation_mode == 'all' or self.aggregation_mode == "avg_per_day":
+            print("\n--- [EXTENDED METRIC] Average Trip Duration per Day of Week (1=Sun, 7=Sat) ---")
+            avg_dow_df = analyzed_df.groupBy("day_of_week") \
+                .agg(F.round(F.avg("trip_duration_min"), 2).alias("avg_duration_min")) \
+                .sort("day_of_week")
+            avg_dow_df.show(truncate=False)
 
         analyzed_df.unpersist()
 
