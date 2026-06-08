@@ -2,7 +2,7 @@
 Repository for a pipeline of aggregating nyc taxi data.
 
 ## How to use: 
-Prerequisites is an installed and running docker daemon. First the docker images needs to be build
+Prerequisite is an installed and running docker daemon. First the docker images needs to be build
 
 With running docker daemon: 
 ```
