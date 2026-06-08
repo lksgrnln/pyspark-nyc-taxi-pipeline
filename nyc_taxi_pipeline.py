@@ -13,7 +13,8 @@ class NYCTaxiPipeline:
                  years = None,
                  months = None,
                  aggregation_mode: str = 'all',
-                 keep_all_columns: bool = False):
+                 keep_all_columns: bool = False,
+                 test: bool = False):
         """Initializes the Pipeline Class Parameters.
         Args:
             base_uri (str): The base URI where the NYC Taxi Parquet data resides.
@@ -42,6 +43,7 @@ class NYCTaxiPipeline:
         self.aggregation_mode = aggregation_mode
         self.keep_all_columns = keep_all_columns
         self.spark_session = None
+        self.test = test
 
         self.local_data_dir = "/app/data"
         os.makedirs(self.local_data_dir, exist_ok=True)
@@ -213,6 +215,8 @@ class NYCTaxiPipeline:
                 .agg(F.round(F.avg("trip_duration_min"), 2).alias("avg_duration_min")) \
                 .sort("year")
             avg_year_df.show(truncate=False)
+            if self.test:
+                return avg_year_df
 
         if self.aggregation_mode == 'all' or self.aggregation_mode == "avg_per_month":
             print("\n--- [CORE METRIC] Average Trip Duration per Month ---")

@@ -369,3 +369,40 @@ To adjust logging level use sc.setLogLevel(newLevel). For SparkR, use setLogLeve
 
 [INFO] Pipeline execution completed successfully.
 ```
+
+## Testing
+To run a test on the aggregation computation of the implementation, a synthetic data frame is used to compare the 
+function return with hand computed average. Run:
+```
+docker run --rm -it -v "${PWD}:/app" --entrypoint pytest nyc-taxi-pipeline:0.0.1 /app/test_pipeline.py -v -s 
+```
+for windows and 
+```
+docker run --rm -it -v "$(pwd):/app" --entrypoint pytest nyc-taxi-pipeline:0.0.1 /app/test_pipeline.py -v -s 
+```
+for linux.
+
+## Findings
+Over 5 years of aggregation show that the average passenger spends 17 Minutes and 36 seconds in a New York taxi. 
+If the average per month throughout the years is perceived the first 2-3 month tend to show lower averages may due 
+to holidays where there could be less traffic compared to other months. In 2021 the average of January and February is 
+even lower than for later years may due to COVID restrictions. The aggregation per hour over 5 years shows the clear 
+trend that the nightly hours have less traveling time compared to rush hours with higher traffic like 
+the working period from around 5 am till 17 pm. Also, the time spent aggregated per weekday shows higher duration for 
+workdays Monday till Friday. The data contained several anomalies like month containing data points from other month 
+then requested due to measuring methods in the taxameters or rides starting on last day of month at aroung 23:50 
+and take until the next first day of month. Also, due to clock drifts, missconfigurations or late offline updates
+some files contained even rides from other years which are also filtered out in the clean_data function. 
+
+For low power laptops with 8gb of RAM and older processors the runtime is fairly high with local execution. 
+Nevertheless, if we use a compute cluster or higher power hardware with more cores and more RAM the pipeline scales 
+with the hardware and availability of several machines where pyspark could compute distributed. By dropping obsolete 
+data for average duration computation we ensure only relevant data is loaded to memory. We unified the dataframes by 
+typecasting all relevant data types to the same in the unified dataframe to overcome schema missmatches between the
+years. The pipeline is also highly parameterized to compute only relevant metrics and set RAM size based on the 
+available hardware. 
+
+Regarding testing purposes, a pytest check with a small data frame can be utilized with 5 data points where the 
+aggregation can be computed by hand and then compare the results to the code return values. Several other checks could 
+assure data integrity like checking for filtered out values. Overall each function should get a test function to ensure
+proper functionality.
